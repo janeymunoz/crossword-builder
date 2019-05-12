@@ -1,0 +1,5 @@
+.stack-work/
+crossword-builder.cabal
+*~
+.words
+.board
