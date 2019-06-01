@@ -22,6 +22,8 @@ type AnswerID = Int
 data Word' = Word' CellID AnswerID Direction [Char]
   deriving (Show, Read, Eq)
 
+type Cells = IntMap.IntMap (IntMap.IntMap Cell)
+
 data Board = Board
   { direction :: Direction
   , size :: Size
@@ -30,7 +32,7 @@ data Board = Board
   , highlighted :: Maybe (CellID, CellID)
   , answerIDs :: IntMap.IntMap CellID
   , wordBank :: [Maybe Word']
-  , cells :: IntMap.IntMap (IntMap.IntMap Cell)
+  , cells :: Cells
   }
   deriving (Show, Read, Eq)
 
@@ -86,7 +88,7 @@ startBoard si =
 
 -- Note: The 'cells' value is indexed by columns first, then rows, e.g.:
 --   cells[row][col] == 'lookup col =<< lookup row cells'
-startCells :: Size -> IntMap.IntMap (IntMap.IntMap Cell)
+startCells :: Size -> Cells
 startCells si = IntMap.fromAscList $ zip [1..numCs] $ replicate numCs cols
   where cols = IntMap.fromAscList [ (i, Empty) | i <- [1..numCs] ]
         numCs = sizeToInt si
@@ -98,8 +100,8 @@ startCells si = IntMap.fromAscList $ zip [1..numCs] $ replicate numCs cols
 -- Updates the state of a selected cell.
 updateCell :: CellID
            -> Cell
-           -> IntMap.IntMap (IntMap.IntMap Cell)
-           -> IntMap.IntMap (IntMap.IntMap Cell)
+           -> Cells
+           -> Cells
 updateCell (CellID r c) cStateNew cs = IntMap.adjust updateRow r cs
   where
     updateRow :: IntMap.IntMap Cell -> IntMap.IntMap Cell
@@ -112,8 +114,8 @@ updateCellAndComp :: Size
                   -> Symmetry
                   -> CellID
                   -> Cell
-                  -> IntMap.IntMap (IntMap.IntMap Cell)
-                  -> IntMap.IntMap (IntMap.IntMap Cell)
+                  -> Cells
+                  -> Cells
 updateCellAndComp si sym cMain cStateNew cs =
   updateCell cComp cCompNew cMainUpdated
   where cMainUpdated = updateCell cMain cStateNew cs
@@ -154,7 +156,7 @@ parseWords wordMs (across, down) =
     Just (Word' cID ansID Across chars) : ws -> parseWords ws (across ++ [DT.pack ((show ansID) ++ " " ++ chars)], down)
     Just (Word' cID ansID Down chars) : ws -> parseWords ws (across, down ++ [DT.pack ((show ansID) ++ " " ++ chars)])
 
-makeWords :: Size -> IntMap.IntMap (IntMap.IntMap Cell) -> [Maybe Word']
+makeWords :: Size -> Cells -> [Maybe Word']
 makeWords si cs =
   Protolude.map (toWord si cs Across) across ++
     Protolude.map (toWord si cs Down) down
@@ -163,7 +165,7 @@ makeWords si cs =
     down   = DS.toList $ getWordEnds si cs Down
 
 toWord :: Size
-       -> IntMap.IntMap (IntMap.IntMap Cell)
+       -> Cells
        -> Direction
        -> Maybe (CellID, CellID)
        -> Maybe Word'
@@ -178,7 +180,7 @@ toWord si cs dir range =
           IntMap.toList . IntMap.filter ((==) cID) $ getAnswerIDs si cs
 
 getWords :: Size
-         -> IntMap.IntMap (IntMap.IntMap Cell)
+         -> Cells
          -> Direction
          -> [DT.Text]
 getWords si cs dir =
@@ -211,7 +213,7 @@ getWordChars cellGroup =
     Just cs -> Protolude.map mapCellToChar cs
 
 getCellStateWord :: Direction
-                  -> IntMap.IntMap (IntMap.IntMap Cell)
+                  -> Cells
                   -> Maybe (CellID, CellID)
                   -> Maybe [Maybe Cell]
 getCellStateWord dir cs ends =
@@ -222,7 +224,7 @@ getCellStateWord dir cs ends =
         where range = [ CellID r c | r <- [r0..r1], c <- [c0..c1] ]
       
 getWordEnds :: Size
-         -> IntMap.IntMap (IntMap.IntMap Cell)
+         -> Cells
          -> Direction
          -> DS.Set (Maybe (CellID, CellID))
 getWordEnds si cs dir =
@@ -238,7 +240,7 @@ getWordEnds si cs dir =
 -- data Word' = Word' CellID Direction [Char]
 
 getAnswerIDs :: Size
-             -> IntMap.IntMap (IntMap.IntMap Cell)
+             -> Cells
              -> IntMap.IntMap CellID
 getAnswerIDs si cs = labelEdges $ getEdgeIDs si cs
 
@@ -247,19 +249,19 @@ labelEdges edges = IntMap.fromAscList . zip [1..numEdges] $ DS.toAscList edges
   where numEdges = DS.size edges
 
 getEdgeIDs :: Size
-           -> IntMap.IntMap (IntMap.IntMap Cell)
+           -> Cells
            -> DS.Set CellID
 getEdgeIDs si cs =
   DS.union (getEdgeIDsDir si cs Down) (getEdgeIDsDir si cs Across)
 
 getEdgeIDsDir :: Size
-              -> IntMap.IntMap (IntMap.IntMap Cell)
+              -> Cells
               -> Direction
               -> DS.Set CellID
 getEdgeIDsDir si cs dir =
   DS.fromList . fst . DL.partition (isEdge cs dir) $ allCellIDs si
 
-isEdge :: IntMap.IntMap (IntMap.IntMap Cell) -> Direction -> CellID -> Bool
+isEdge :: Cells -> Direction -> CellID -> Bool
 isEdge cs dir cID =
   case getCellState cs cID of
     Nothing     -> False
@@ -277,7 +279,7 @@ isEdge cs dir cID =
 -- Returns a tuple representing an inclusive range over which the cells 
 -- in the grid should be highlighted.
 newHighlighted :: Size
-               -> IntMap.IntMap (IntMap.IntMap Cell)
+               -> Cells
                -> Direction
                -> CellID
                -> Maybe (CellID, CellID)
@@ -290,7 +292,7 @@ newHighlighted si cs dir selectedCID =
 
 -- 'Looks' a relative direction until a cell is Off or a wall is hit.
 lookUntil :: Size
-          -> IntMap.IntMap (IntMap.IntMap Cell)
+          -> Cells
           -> CellID
           -> Direction
           -> Rel
@@ -319,7 +321,7 @@ adjacentCellID dir dirRel (CellID row col) =
                    Minus -> -1
 
 -- Returns a cell's state from the group of all cells.
-getCellState :: IntMap.IntMap (IntMap.IntMap Cell) -> CellID -> Maybe Cell
+getCellState :: Cells -> CellID -> Maybe Cell
 getCellState cs cID =
   case IntMap.lookup row cs of
     Nothing -> Nothing
@@ -368,7 +370,7 @@ ifEndBegin si (CellID r c)
 nextSelected :: Size
              -> Direction
              -> CellID
-             -> IntMap.IntMap (IntMap.IntMap Cell) 
+             -> Cells 
              -> CellID
 nextSelected si dir selectedCID cs =
   case rAdj > numCells || cAdj > numCells of
