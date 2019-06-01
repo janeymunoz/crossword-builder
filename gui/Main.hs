@@ -36,21 +36,13 @@ type Px = Int
 cellSize :: Px
 cellSize = 30
 
--- Arbitrary width of panel that will house several buttons
-panelSizeW :: Px
-panelSizeW = 200
-
--- Arbitrary width of a border around grid
-borderW :: Px
-borderW = 30
-
 -- Grid is a square. The output is the length of a square edge in pixels.
 gridSize :: CW.Size -> Px
 gridSize s = cellSize * (CW.sizeToInt s)
 
 -- Size of the display formatted for Gloss
 displaySize :: CW.Size -> (Px, Px)
-displaySize s = (l + panelSizeW + borderW, l + borderW + borderW)
+displaySize s = (l, l)
   where l = gridSize s
 
 ------------------
@@ -67,7 +59,7 @@ cellCoords s (CW.CellID r c) = [ (xStart, yStart)
                                ]
   where offCenter = div (gridSize s) 2
         cS = toEnum cellSize
-        xStart = toEnum $ (c - 1) * cellSize - offCenter - (div panelSizeW 2) + borderW
+        xStart = toEnum $ (c - 1) * cellSize - offCenter
         yStart = toEnum $ offCenter - (r - 1) * cellSize
 
 -- Given a crossword Size and a list of CellIDs, will output a list of all
@@ -78,8 +70,7 @@ allCellCoords s cIDs = map (cellCoords s) cIDs
 xyToCellID :: CW.Size -> (Float, Float) -> CW.CellID
 xyToCellID si (x,y) =
   CW.CellID (fromEnum ((offCenter + cellSizeF - y) / cellSizeF))
-            (fromEnum (((toEnum $ div panelSizeW 2) - (toEnum borderW)
-              + x + offCenter + cellSizeF) / cellSizeF))
+            (fromEnum ((x + offCenter + cellSizeF) / cellSizeF))
   where offCenter = toEnum $ div (gridSize si) 2
         cellSizeF = toEnum cellSize
 
@@ -89,7 +80,7 @@ xyToCellID si (x,y) =
 
 -- Transforms the state of the board into a picture
 boardToPic :: CW.Board -> IO GG.Picture
-boardToPic b = pure $ GG.pictures [ csPic, hPic, selPic, grid si, addAnswerIDs si aIDs, button si "load"]
+boardToPic b = pure $ GG.pictures [ csPic, hPic, selPic, grid si, addAnswerIDs si aIDs]
   where csPic = GG.pictures . map parsePics $ cellsToPic si cs $ CW.allCellIDs si
         hPic = highlightedPic si hs
         selPic = GG.color (GG.withAlpha 0.7 GG.cyan) $ GG.polygon $ cellCoords si sel
@@ -110,10 +101,17 @@ parsePics mP =
     Just p -> p
     Nothing -> GG.Blank
 
-cellsToPic :: CW.Size -> IntMap.IntMap (IntMap.IntMap CW.Cell) -> [CW.CellID] -> [Maybe GG.Picture]
-cellsToPic si cs cIDs = map (cellToPic si cs) cIDs
+cellsToPic :: CW.Size
+           -> IntMap.IntMap (IntMap.IntMap CW.Cell)
+           -> [CW.CellID]
+           -> [Maybe GG.Picture]
+cellsToPic si cs cIDs =
+  map (cellToPic si cs) cIDs
 
-cellToPic :: CW.Size -> IntMap.IntMap (IntMap.IntMap CW.Cell) -> CW.CellID -> Maybe GG.Picture
+cellToPic :: CW.Size
+          -> IntMap.IntMap (IntMap.IntMap CW.Cell)
+          -> CW.CellID
+          -> Maybe GG.Picture
 cellToPic si cs cID =
   case CW.getCellState cs cID of
     Nothing -> Nothing
@@ -152,56 +150,6 @@ cellColor cellState =
     CW.Off     -> GG.black
     CW.Empty   -> GG.greyN 0.5
     CW.Alpha _ -> GG.white
-
-
-----------------------
--- Buttons as pictures
-----------------------
-
--- Arbitrary width (x) and length (y) of a button
-
-buttonSize :: (Px, Px)
-buttonSize = (cellSize * 3, cellSize * 2)
-
-data Button = Button [Char]
-
-buttonsAll :: [Button]
-buttonsAll = [ Button "load"
-             ]
-
-buttonsToPic :: CW.Size -> [Button] -> (Float, Float)
-buttonsToPic si buttons = (buttonSiX, buttonSiY)
-  where buttonSiX = toEnum $ fst buttonSize
-        buttonSiY = toEnum $ snd buttonSize
-
--- Returns a Picture of a Button that starts in the given CellID
-buttonToPic :: CW.Size -> Button -> CW.Row -> GG.Picture
-buttonToPic si button r =
-  GG.translate transX transY $ GG.color GG.azure $ GG.rectangleSolid buttonSiX buttonSiY
-  where buttonSiX = toEnum $ fst buttonSize
-        buttonSiY = toEnum $ snd buttonSize
-        transX = undefined
-        transY = undefined
-
-buttonPos :: CW.Size -> CW.Row -> (Float, Float)
-buttonPos si r = (1.0, 1.0)
-  where transX = 2 + CW.sizeToInt si
-
--- cellCoords :: CW.Size -> CW.CellID -> [GG.Point]
-button si st =
-    GG.translate xTrans yTrans $ 
-      GG.pictures 
-        [ GG.color GG.azure $ GG.rectangleSolid (toEnum $ fst buttonSize) (toEnum $ snd buttonSize)
-        , GG.translate (-25.0) (-10.0) $ GG.scale 0.25 0.25 $ GG.text st 
-        ]
-  where (xTotal, yTotal) = displaySize si
-        xUpperR = toEnum xTotal / 2
-        yUpperR = toEnum yTotal / 2
-        xTrans = xUpperR - toEnum (3 * borderW)
-        yTrans = yUpperR - toEnum (2 * borderW)
-        
-goButton :: (x,y)
-goButton = undefined
 
 --------------------------------------------------------------------------------
 -- Event handling
@@ -268,7 +216,6 @@ handleEvent e b@CW.Board{..} =
                  CW.updateCellAndComp size symmetry selected (CW.Alpha c) cells
     _ -> b
 
-
 -----------------------------------
 -- Supplementary for event handling
 -----------------------------------
@@ -284,7 +231,11 @@ eventCallback event board = do
         ((DT.pack "\nDown") : down)
   pure newBoard
 
-selectWithKey :: CW.Size -> CW.Direction -> CW.CellID -> GG.SpecialKey -> CW.CellID
+selectWithKey :: CW.Size
+              -> CW.Direction
+              -> CW.CellID
+              -> GG.SpecialKey
+              -> CW.CellID
 selectWithKey si dir (CW.CellID curR curC) k =
   case k of
     GG.KeyUp    -> CW.ifEndBegin si $ CW.CellID (curR-1) curC
