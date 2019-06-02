@@ -33,6 +33,7 @@ data Board = Board
   , answerIDs :: IntMap.IntMap CellID
   , wordBank :: [Maybe Word']
   , cells :: Cells
+  , sessionID :: FilePath
   }
   deriving (Show, Read, Eq)
 
@@ -73,8 +74,8 @@ allCellIDs s = [ CellID r c | r <- [1..i], c <- [1..i] ]
 -- Initial Crossword state
 --------------------------------------------------------------------------------
 
-startBoard :: Size -> Board
-startBoard si =
+startBoard :: Size -> FilePath -> Board
+startBoard si fp =
   Board { direction = Across
         , size = si
         , symmetry = XY
@@ -83,6 +84,7 @@ startBoard si =
         , answerIDs = getAnswerIDs si $ startCells si
         , wordBank = []
         , cells = startCells si
+        , sessionID = fp
         }
     where numCells = sizeToInt si
 
@@ -403,7 +405,7 @@ toggleCellState cState =
 --------------------------------------------------------------------------------
 
 prettyBoard :: Board -> [Char]
-prettyBoard (Board _ s _ _ _ _ _ cs) =
+prettyBoard (Board _ s _ _ _ _ _ cs _) =
   "   " <> prettyCols s <> ['\n'] <> (IntMap.foldrWithKey prettyRows "" cs)
 
 prettyRows :: IntMap.Key -> IntMap.IntMap Cell -> [Char] -> [Char]

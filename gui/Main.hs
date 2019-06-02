@@ -8,18 +8,39 @@ import qualified Graphics.Gloss.Interface.IO.Interact as GG
 import qualified Data.IntMap as IntMap
 import qualified Data.Char as DC
 import qualified Data.Text as DT
+import qualified Data.Time.Clock as DTC
 import qualified Crossword as CW
 
 
 main :: IO ()
-main = 
+main = do
+  -- get session ID (current UTC time)
+  sID <- getSessionID
+  -- main gui loop
   GG.interactIO
     (GG.InWindow "Crossword Builder" (displaySize CW.Fifteen) (100,100))
     GG.white
-    (CW.startBoard CW.Fifteen)
+    (CW.startBoard CW.Fifteen sID)
     boardToPic
     eventCallback
     (const $ pure ())
+
+getSessionID :: IO FilePath
+getSessionID = do
+  -- get current UTCTime
+  utc <- DTC.getCurrentTime
+  let sID = show utc
+  pure sID
+
+delimitSplit :: Char -> [Char] -> [[Char]] -> [Char] -> [[Char]]
+delimitSplit delim strMain strs strBuild =
+  case strMain of
+    []   -> [[]]
+    x:xs -> case x == delim of
+              True  -> case strBuild of
+                         [] -> delimitSplit delim xs strs strBuild
+                         _  -> delimitSplit delim xs ((++) strs [strBuild]) []
+              False -> delimitSplit delim xs strs $ (:) x strBuild
 
 --------------------------------------------------------------------------------
 -- Converting Crossword features to Gloss data types
@@ -80,7 +101,13 @@ xyToCellID si (x,y) =
 
 -- Transforms the state of the board into a picture
 boardToPic :: CW.Board -> IO GG.Picture
-boardToPic b = pure $ GG.pictures [ csPic, hPic, selPic, grid si, addAnswerIDs si aIDs]
+boardToPic b =
+  pure $ GG.pictures [ csPic
+                     , hPic
+                     , selPic
+                     , grid si
+                     , addAnswerIDs si aIDs
+                     ]
   where csPic = GG.pictures . map parsePics $ cellsToPic si cs $ CW.allCellIDs si
         hPic = highlightedPic si hs
         selPic = GG.color (GG.withAlpha 0.7 GG.cyan) $ GG.polygon $ cellCoords si sel
@@ -93,7 +120,12 @@ boardToPic b = pure $ GG.pictures [ csPic, hPic, selPic, grid si, addAnswerIDs s
 
 -- Adds grid and highlighting to the board Picture
 grid :: CW.Size -> GG.Picture
-grid s = GG.pictures . map (GG.color GG.black) . map GG.lineLoop . allCellCoords s $ CW.allCellIDs s
+grid s =
+  GG.pictures .
+    map (GG.color GG.black) .
+      map GG.lineLoop .
+        allCellCoords s $
+          CW.allCellIDs s
 
 parsePics :: Maybe GG.Picture -> GG.Picture
 parsePics mP =
@@ -102,34 +134,46 @@ parsePics mP =
     Nothing -> GG.Blank
 
 cellsToPic :: CW.Size
-           -> IntMap.IntMap (IntMap.IntMap CW.Cell)
+           -> CW.Cells
            -> [CW.CellID]
            -> [Maybe GG.Picture]
 cellsToPic si cs cIDs =
   map (cellToPic si cs) cIDs
 
 cellToPic :: CW.Size
-          -> IntMap.IntMap (IntMap.IntMap CW.Cell)
+          -> CW.Cells
           -> CW.CellID
           -> Maybe GG.Picture
 cellToPic si cs cID =
   case CW.getCellState cs cID of
     Nothing -> Nothing
-    Just st -> Just . (addAlpha si st cID) . GG.color (cellColor st) $ GG.polygon (cellCoords si cID)
+    Just st -> Just .
+                 addAlpha si st cID .
+                   GG.color (cellColor st) .
+                     GG.polygon $ cellCoords si cID
 
 addAlpha :: CW.Size -> CW.Cell -> CW.CellID -> GG.Picture -> GG.Picture
 addAlpha si cState cID p =
   case cState of
-    CW.Alpha c -> GG.translate (lowerLX + (toEnum $ div cellSize 4)) (lowerLY + (toEnum $ div cellSize 4)) $ GG.scale (1 / scaler) (1 / scaler) $ GG.pictures [ p, GG.text [ DC.toUpper c] ]
+    CW.Alpha c -> GG.translate
+                    (lowerLX + (toEnum $ div cellSize 4))
+                    (lowerLY + (toEnum $ div cellSize 4)) $
+                      GG.scale (1 / scaler) (1 / scaler) $
+                        GG.pictures [ p, GG.text [ DC.toUpper c ] ]
       where scaler = (toEnum cellSize) / 5
             [_, (lowerLX, lowerLY), _, _] = cellCoords si cID
     _          -> p
 
 addAnswerIDs :: CW.Size -> IntMap.IntMap CW.CellID -> GG.Picture
-addAnswerIDs si ansIDs = GG.pictures . map (getPic si) $ IntMap.toAscList ansIDs
+addAnswerIDs si ansIDs =
+  GG.pictures . map (getPic si) $ IntMap.toAscList ansIDs
   where
     getPic :: CW.Size -> (IntMap.Key, CW.CellID) -> GG.Picture
-    getPic si (k, cID) = GG.translate transX (transY - 10.0) . GG.scale scaler scaler . GG.text $ show k
+    getPic si (k, cID) =
+      GG.translate transX (transY - 10.0) .
+        GG.scale scaler scaler .
+          GG.text $
+            show k
       where [(transX, transY), _, _, _] = cellCoords si cID
             scaler :: Float
             scaler = (toEnum cellSize) / 450
@@ -139,8 +183,12 @@ highlightedPic si cIDs =
   case cIDs of
     Nothing -> GG.blank
     Just (CW.CellID r1 c1, CW.CellID r2 c2) ->
-      GG.pictures . map (GG.color $ GG.withAlpha 0.4 GG.cyan) $ map GG.polygon allHs
-        where allHs = map (cellCoords si) [ CW.CellID r c | r <- [r1..r2], c <- [c1..c2] ]
+      GG.pictures .
+        map (GG.color $ GG.withAlpha 0.4 GG.cyan) $
+          map GG.polygon allHs
+        where allHs =
+                map (cellCoords si)
+                    [ CW.CellID r c | r <- [r1..r2], c <- [c1..c2] ]
 
 -- Associates Cell states to Colors
 cellColor :: CW.Cell -> GG.Color
@@ -214,6 +262,7 @@ handleEvent e b@CW.Board{..} =
            }
          where newCells =
                  CW.updateCellAndComp size symmetry selected (CW.Alpha c) cells
+    -- load the last 
     _ -> b
 
 -----------------------------------
@@ -225,8 +274,8 @@ eventCallback :: GG.Event -> CW.Board -> IO CW.Board
 eventCallback event board = do
   let newBoard = handleEvent event board
       (across, down) = CW.parseWords (CW.wordBank newBoard) ([], [])
-  writeFile ".board" . DT.pack $ show newBoard
-  writeFile ".words" . DT.unlines $
+  writeFile ("sessions/" <> CW.sessionID board <> ".board") . DT.pack $ show newBoard
+  writeFile ("sessions/" <> CW.sessionID board <> ".words") . DT.unlines $
     ((DT.pack "Across") : across) ++
         ((DT.pack "\nDown") : down)
   pure newBoard

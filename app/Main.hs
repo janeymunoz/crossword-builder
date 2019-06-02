@@ -18,6 +18,7 @@ main = do
                 , answerIDs = labelEdges . getEdgeIDs s $ startCells s
                 , wordBank = []
                 , cells = startCells s
+                , sessionID = []
                 }
   loop b
   

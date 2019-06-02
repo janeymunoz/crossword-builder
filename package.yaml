@@ -25,6 +25,7 @@ dependencies:
 - containers
 - text
 - gloss
+- time
 
 default-extensions:
   - NoImplicitPrelude
