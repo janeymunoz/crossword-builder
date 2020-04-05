@@ -1,28 +1,64 @@
 module Crossword where
 
 import Protolude hiding (Down)
-import qualified Data.IntMap as IntMap
-import qualified Data.Text as DT hiding (zip, replicate)
 import qualified Data.Char as DC
-import qualified Data.Set as DS
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as DL
+import qualified Data.Set as DS
+import qualified Data.Text as DT hiding (zip, replicate)
 
 --------------------------------------------------------------------------------
 -- Definitions
 --------------------------------------------------------------------------------
 
-data Cell = On
-          | Off
-          | Empty
-          | Alpha Char
-  deriving (Show, Read, Eq)
+type Row = Int
+type Col = Int
+
+data CellID = CellID Row Col
+  deriving (Eq, Ord, Read, Show)
+
+data CellState
+  = On
+  | Off
+  | Empty
+  | Alpha Char
+  deriving (Eq, Read, Show)
+
+data Cell = Cell
+  { id' :: CellID
+  , state :: CellState
+  }
+  deriving (Eq, Read, Show)
 
 type AnswerID = Int
+
+data Direction
+  = Across
+  | Down
+  deriving (Show, Read, Eq)
 
 data Word' = Word' CellID AnswerID Direction [Char]
   deriving (Show, Read, Eq)
 
-type Cells = IntMap.IntMap (IntMap.IntMap Cell)
+-- Map Row (Map Col CellState)
+type Cells = IntMap.IntMap (IntMap.IntMap CellState)
+
+data Rel
+  = Plus
+  | Minus
+  deriving (Show, Read, Eq)
+
+data Size
+  = Fifteen
+  | TwentyOne
+  deriving (Show, Read, Eq)
+
+data Symmetry
+  = XY
+  | X
+  | Y
+  | NoSym
+  deriving (Show, Read, Eq)
 
 data Board = Board
   { direction :: Direction
@@ -36,24 +72,6 @@ data Board = Board
   , sessionID :: FilePath
   }
   deriving (Show, Read, Eq)
-
-data Direction = Across | Down
-  deriving (Show, Read, Eq)
-
-data Rel = Plus | Minus
-  deriving (Show, Read, Eq)
-
-data Size = Fifteen | TwentyOne
-  deriving (Show, Read, Eq)
-
-data CellID = CellID Row Col
-  deriving (Show, Read, Eq, Ord)
-
-data Symmetry = XY | X | Y | NoSym
-  deriving (Show, Read, Eq)
-
-type Row = Int
-type Col = Int
 
 -------------------------------
 -- Supplementary to definitions
@@ -101,21 +119,21 @@ startCells si = IntMap.fromAscList $ zip [1..numCs] $ replicate numCs cols
 
 -- Updates the state of a selected cell.
 updateCell :: CellID
-           -> Cell
+           -> CellState
            -> Cells
            -> Cells
 updateCell (CellID r c) cStateNew cs = IntMap.adjust updateRow r cs
   where
-    updateRow :: IntMap.IntMap Cell -> IntMap.IntMap Cell
+    updateRow :: IntMap.IntMap CellState -> IntMap.IntMap CellState
     updateRow rStateOld = IntMap.adjust updateCol c rStateOld
-    updateCol :: Cell -> Cell
+    updateCol :: CellState -> CellState
     updateCol cStateOld = cStateNew
 
 -- Updates the state of a selected cell and its complement.
 updateCellAndComp :: Size
                   -> Symmetry
                   -> CellID
-                  -> Cell
+                  -> CellState
                   -> Cells
                   -> Cells
 updateCellAndComp si sym cMain cStateNew cs =
@@ -192,7 +210,7 @@ getWords si cs dir =
         Protolude.map (getCellStateWord dir cs) .
           DS.toList $ getWordEnds si cs dir
 
-mapCellToChar :: Maybe Cell -> Maybe Char
+mapCellToChar :: Maybe CellState -> Maybe Char
 mapCellToChar cState =
   case cState of
     Nothing        -> Nothing
@@ -208,7 +226,7 @@ getWordStr csMaybe =
     ((Just c):cs) -> c : getWordStr cs
     []            -> []
 
-getWordChars :: Maybe [Maybe Cell] -> [Maybe Char]
+getWordChars :: Maybe [Maybe CellState] -> [Maybe Char]
 getWordChars cellGroup =
   case cellGroup of
     Nothing -> []
@@ -217,7 +235,7 @@ getWordChars cellGroup =
 getCellStateWord :: Direction
                   -> Cells
                   -> Maybe (CellID, CellID)
-                  -> Maybe [Maybe Cell]
+                  -> Maybe [Maybe CellState]
 getCellStateWord dir cs ends =
   case ends of
     Nothing                           -> Nothing
@@ -323,7 +341,7 @@ adjacentCellID dir dirRel (CellID row col) =
                    Minus -> -1
 
 -- Returns a cell's state from the group of all cells.
-getCellState :: Cells -> CellID -> Maybe Cell
+getCellState :: Cells -> CellID -> Maybe CellState
 getCellState cs cID =
   case IntMap.lookup row cs of
     Nothing -> Nothing
@@ -334,7 +352,7 @@ getCellState cs cID =
 
 -- If a cell's state is updated, its complement will also need to be updated.
 -- This function outlines how the complement should be updated.
-updateComp :: Cell -> Cell -> Cell
+updateComp :: CellState -> CellState -> CellState
 updateComp changedCell compCell =
   case changedCell of
     Off     -> Off
@@ -390,7 +408,7 @@ otherDir d = case d of
                Across -> Down
 
 -- Given a cell's state, returns the next cell state in the toggling series.
-toggleCellState :: Maybe Cell -> Cell
+toggleCellState :: Maybe CellState -> CellState
 toggleCellState cState =
   case cState of
     Nothing -> Empty
@@ -408,12 +426,12 @@ prettyBoard :: Board -> [Char]
 prettyBoard (Board _ s _ _ _ _ _ cs _) =
   "   " <> prettyCols s <> ['\n'] <> (IntMap.foldrWithKey prettyRows "" cs)
 
-prettyRows :: IntMap.Key -> IntMap.IntMap Cell -> [Char] -> [Char]
+prettyRows :: IntMap.Key -> IntMap.IntMap CellState -> [Char] -> [Char]
 prettyRows k newRow prevRowPretty =
   r ++ " " ++ (prettyRow newRow) ++ ['\n'] ++ prevRowPretty
     where r = intWLeadZero k
 
-prettyRow :: IntMap.IntMap Cell -> [Char]
+prettyRow :: IntMap.IntMap CellState -> [Char]
 prettyRow cs =
   Protolude.foldl prettyCellStates "" cs
 
@@ -423,7 +441,7 @@ prettyCols s = Protolude.foldr appNums "" [1..numCols]
         appNums :: Int -> [Char] -> [Char]
         appNums i cs = (intWLeadZero i) ++ " " ++ cs
 
-prettyCellStates :: [Char] -> Cell -> [Char]
+prettyCellStates :: [Char] -> CellState -> [Char]
 prettyCellStates prevPretty newCell = smushed
   where smushed = prevPretty ++ newPretty
         newPretty =

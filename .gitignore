@@ -2,3 +2,5 @@
 crossword-builder.cabal
 *~
 sessions/*
+dist-newstyle/*
+result*
