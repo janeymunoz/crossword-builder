@@ -1,0 +1,80 @@
+-- This file has been generated from package.yaml by hpack version 0.28.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 7f4c85b2474154ac348eed6a75b7dbe0c03339429b4c8cfeeea20d6fb3846c6e
+
+name:           crossword-builder
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/janeymunoz/crossword-builder#readme>
+homepage:       https://github.com/janeymunoz/crossword-builder#readme
+bug-reports:    https://github.com/janeymunoz/crossword-builder/issues
+author:         Janey Muñoz
+maintainer:     janeemunoz@gmail.com
+copyright:      Copyright (c) 2018 Janey Muñoz
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+cabal-version:  >= 1.10
+extra-source-files:
+    ChangeLog.md
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/janeymunoz/crossword-builder
+
+library
+  exposed-modules:
+      Crossword
+    , Action
+    , Model
+    , Update
+    , View
+  other-modules:
+      Paths_crossword_builder
+  hs-source-dirs:
+      src
+  default-extensions: NoImplicitPrelude
+  build-depends:
+      base >=4.7 && <5
+    , protolude
+    , containers
+    , filepath
+    , lens
+    , miso
+    , text
+  default-language: Haskell2010
+
+executable miso-app-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_crossword_builder
+  hs-source-dirs:
+      app
+  default-extensions: NoImplicitPrelude
+  ghcjs-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , protolude
+    , crossword-builder
+    , miso
+  default-language: Haskell2010
+
+test-suite crossword-builder-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_crossword_builder
+  hs-source-dirs:
+      test
+  default-extensions: NoImplicitPrelude
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , crossword-builder
+    , protolude
+    , text
+    , time
+  default-language: Haskell2010

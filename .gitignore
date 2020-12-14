@@ -1,5 +1,4 @@
 .stack-work/
-crossword-builder.cabal
 *~
 sessions/*
 dist-newstyle/*
