@@ -1,25 +1,28 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StrictData #-}
 
 module Main where
 
 import Protolude
-import qualified Miso
+import Miso
 
-import qualified Action
-import qualified Crossword
-import qualified Model
-import qualified Update
-import qualified View
+import Action
+import Crossword
+import Model
+import Update
+import View
 
 main :: IO ()
 main =
   Miso.startApp $
     Miso.App
-       { Miso.initialAction = Action.NoAction
-       , Miso.model         = Model.Model $ Crossword.startBoard Crossword.Fifteen "test.cw"
-       , Miso.update        = Miso.fromTransition . Update.updateModel
-       , Miso.view          = View.viewModel
-       , Miso.events        = Miso.defaultEvents
-       , Miso.mountPoint    = Nothing
-       , Miso.subs          = []
+       { initialAction = NoAction
+       , model         = Model $ startBoard Fifteen "test.cw"
+       , update        = fromTransition . updateModel
+       , view          = viewModel
+       , events        = defaultEvents
+       , mountPoint    = Nothing
+       , subs          = [ arrowsSub ArrowPress
+                         , keyboardSub KeyboardPress
+                         ]
        }

@@ -1,8 +1,14 @@
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StrictData #-}
 module Crossword where
 
 import Protolude hiding (Down)
+import qualified Control.Lens as Lens
+import qualified Control.Lens.At as At
+import qualified Control.Lens.Operators as Ops
 import qualified Data.Char as DC
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Map.Strict as Map
 import qualified Data.List as DL
 import qualified Data.Set as DS
 import qualified Data.Text as DT hiding (zip, replicate)
@@ -24,12 +30,6 @@ data CellState
   | Alpha Char
   deriving (Eq, Read, Show)
 
-data Cell = Cell
-  { id' :: CellID
-  , state :: CellState
-  }
-  deriving (Eq, Read, Show)
-
 type AnswerID = Int
 
 data Direction
@@ -41,7 +41,8 @@ data Word' = Word' CellID AnswerID Direction [Char]
   deriving (Show, Read, Eq)
 
 -- Map Row (Map Col CellState)
-type Cells = IntMap.IntMap (IntMap.IntMap CellState)
+type Cells' = IntMap.IntMap (IntMap.IntMap CellState)
+type Cells = Map CellID CellState
 
 data Rel
   = Plus
@@ -61,32 +62,59 @@ data Symmetry
   deriving (Show, Read, Eq)
 
 data Board = Board
-  { direction :: Direction
-  , size :: Size
-  , symmetry :: Symmetry
-  , selected :: CellID
-  , highlighted :: Maybe (CellID, CellID)
-  , answerIDs :: IntMap.IntMap CellID
-  , wordBank :: [Maybe Word']
-  , cells :: Cells
-  , sessionID :: FilePath
+  { _direction :: Direction
+  , _size :: Size
+  , _symmetry :: Symmetry
+  , _selected :: CellID
+  , _highlighted :: Maybe (CellID, CellID)
+  , _answerIDs :: IntMap.IntMap CellID
+  , _wordBank :: [Maybe Word']
+  , _cells :: Cells
+  , _sessionID :: FilePath
   }
   deriving (Show, Read, Eq)
 
+direction :: Lens.Lens' Board Direction
+direction = Lens.lens _direction $ \board newDir -> board { _direction = newDir }
+
+size :: Lens.Lens' Board Size
+size = Lens.lens _size $ \board newSize -> board { _size = newSize }
+
+symmetry :: Lens.Lens' Board Symmetry
+symmetry = Lens.lens _symmetry $ \board newSym -> board { _symmetry = newSym }
+
+selected :: Lens.Lens' Board CellID
+selected = Lens.lens _selected $ \board newSel -> board { _selected = newSel }
+
+highlighted :: Lens.Lens' Board (Maybe (CellID, CellID))
+highlighted = Lens.lens _highlighted $ \board newCIDs -> board { _highlighted = newCIDs }
+
+answerIDs :: Lens.Lens' Board (IntMap.IntMap CellID)
+answerIDs = Lens.lens _answerIDs $ \board newMapCIDs -> board { _answerIDs = newMapCIDs }
+
+wordBank :: Lens.Lens' Board [Maybe Word']
+wordBank = Lens.lens _wordBank $ \board newWordBank -> board { _wordBank = newWordBank }
+
+cells :: Lens.Lens' Board Cells
+cells = Lens.lens _cells $ \board newCells -> board { _cells = newCells }
+
+sessionID :: Lens.Lens' Board FilePath
+sessionID = Lens.lens _sessionID $ \board newSID -> board { _sessionID = newSID }
+
 -------------------------------
--- Supplementary to definitions
+-- Supplementary
 -------------------------------
 
 sizeToInt :: Size -> Int
-sizeToInt s =
-  case s of
+sizeToInt size =
+  case size of
     Fifteen   -> 15
     TwentyOne -> 21
 
 -- Given a crossword Size, will output all CellIDs
 allCellIDs :: Size -> [CellID]
-allCellIDs s = [ CellID r c | r <- [1..i], c <- [1..i] ]
-  where i = sizeToInt s
+allCellIDs size = [ CellID r c | r <- range, c <- range ]
+  where range = [ 1..sizeToInt size ]
 
 --------------------------------------------------------------------------------
 -- Initial Crossword state
@@ -94,67 +122,50 @@ allCellIDs s = [ CellID r c | r <- [1..i], c <- [1..i] ]
 
 startBoard :: Size -> FilePath -> Board
 startBoard si fp =
-  Board { direction = Across
-        , size = si
-        , symmetry = XY
-        , selected = CellID 1 1
-        , highlighted = Just (CellID 1 1, CellID 1 numCells)
-        , answerIDs = getAnswerIDs si $ startCells si
-        , wordBank = []
-        , cells = startCells si
-        , sessionID = fp
+  Board { _direction = Across
+        , _size = si
+        , _symmetry = XY
+        , _selected = CellID 1 1
+        , _highlighted = Just (CellID 1 1, CellID 1 numCells)
+        , _answerIDs = getAnswerIDs si $ startCells si
+        , _wordBank = []
+        , _cells = startCells si
+        , _sessionID = fp
         }
     where numCells = sizeToInt si
 
--- Note: The 'cells' value is indexed by columns first, then rows, e.g.:
---   cells[row][col] == 'lookup col =<< lookup row cells'
 startCells :: Size -> Cells
-startCells si = IntMap.fromAscList $ zip [1..numCs] $ replicate numCs cols
-  where cols = IntMap.fromAscList [ (i, Empty) | i <- [1..numCs] ]
-        numCs = sizeToInt si
+startCells si = Map.fromAscList . zip (allCellIDs si) $ repeat Empty
 
 --------------------------------------------------------------------------------
 -- Updating the Crossword
 --------------------------------------------------------------------------------
 
 -- Updates the state of a selected cell.
-updateCell :: CellID
-           -> CellState
-           -> Cells
-           -> Cells
-updateCell (CellID r c) cStateNew cs = IntMap.adjust updateRow r cs
-  where
-    updateRow :: IntMap.IntMap CellState -> IntMap.IntMap CellState
-    updateRow rStateOld = IntMap.adjust updateCol c rStateOld
-    updateCol :: CellState -> CellState
-    updateCol cStateOld = cStateNew
+updateCell :: CellID -> CellState -> Cells -> Cells
+updateCell = Map.insert
 
 -- Updates the state of a selected cell and its complement.
-updateCellAndComp :: Size
-                  -> Symmetry
-                  -> CellID
-                  -> CellState
-                  -> Cells
-                  -> Cells
+updateCellAndComp :: Size -> Symmetry -> CellID -> CellState -> Cells -> Cells
 updateCellAndComp si sym cMain cStateNew cs =
   updateCell cComp cCompNew cMainUpdated
-  where cMainUpdated = updateCell cMain cStateNew cs
-        cComp = case complementCellID si sym cMain of
-                  Nothing  -> cMain
-                  Just cID -> cID
-        cCompOld = case getCellState cs cComp of
-                     Nothing -> cStateNew
-                     Just s -> s
-        cCompNew = updateComp cStateNew cCompOld
+    where
+      cMainUpdated = updateCell cMain cStateNew cs
+      cComp = case complementCellID si sym cMain of
+                Nothing  -> cMain
+                Just cID -> cID
+      cCompOld = case getCellState cs cComp of
+                   Nothing -> cStateNew
+                   Just s -> s
+      cCompNew = updateComp cStateNew cCompOld
 
 updSelAndHi :: Board -> CellID -> Board
-updSelAndHi b selectedCID =
-  b { selected = case inRange (size b) selectedCID of
+updSelAndHi b@Board{..} selectedCID =
+  b { _selected = case inRange _size selectedCID of
                    True  -> selectedCID
-                   False -> selPrev
-    , highlighted = newHighlighted (size b) (cells b) (direction b) selectedCID
+                   False -> _selected
+    , _highlighted = newHighlighted _size _cells _direction selectedCID
     }
-      where selPrev = selected b
 
 inRange :: Size -> CellID -> Bool
 inRange si (CellID r c) =
@@ -166,7 +177,6 @@ inRange si (CellID r c) =
 ---------------------
 -- Updating Word Bank
 ---------------------
---data Word' = Word' CellID AnswerID Direction [Char]
 
 parseWords :: [Maybe Word'] -> ([DT.Text], [DT.Text]) -> ([DT.Text], [DT.Text])
 parseWords wordMs (across, down) =
@@ -233,15 +243,16 @@ getWordChars cellGroup =
     Just cs -> Protolude.map mapCellToChar cs
 
 getCellStateWord :: Direction
-                  -> Cells
-                  -> Maybe (CellID, CellID)
-                  -> Maybe [Maybe CellState]
-getCellStateWord dir cs ends =
-  case ends of
-    Nothing                           -> Nothing
-    Just (CellID r0 c0, CellID r1 c1) ->
-      Just $ Protolude.map (getCellState cs) range
-        where range = [ CellID r c | r <- [r0..r1], c <- [c0..c1] ]
+                 -> Cells
+                 -> Maybe (CellID, CellID)
+                 -> Maybe [Maybe CellState]
+getCellStateWord dir cs ends = case ends of
+  Nothing -> Nothing
+  Just es ->
+    Just . Protolude.map (getCellState cs) $ range es
+
+range :: (CellID, CellID) -> [ CellID ]
+range (CellID r0 c0, CellID r1 c1) = [ CellID r c | r <- [r0..r1], c <- [c0..c1] ]
       
 getWordEnds :: Size
          -> Cells
@@ -259,25 +270,18 @@ getWordEnds si cs dir =
 -- An 'edge' is the start of the grid itself, or an Off cell.
 -- data Word' = Word' CellID Direction [Char]
 
-getAnswerIDs :: Size
-             -> Cells
-             -> IntMap.IntMap CellID
+getAnswerIDs :: Size -> Cells -> IntMap.IntMap CellID
 getAnswerIDs si cs = labelEdges $ getEdgeIDs si cs
 
 labelEdges :: DS.Set CellID -> IntMap.IntMap CellID
 labelEdges edges = IntMap.fromAscList . zip [1..numEdges] $ DS.toAscList edges
   where numEdges = DS.size edges
 
-getEdgeIDs :: Size
-           -> Cells
-           -> DS.Set CellID
+getEdgeIDs :: Size -> Cells -> DS.Set CellID
 getEdgeIDs si cs =
   DS.union (getEdgeIDsDir si cs Down) (getEdgeIDsDir si cs Across)
 
-getEdgeIDsDir :: Size
-              -> Cells
-              -> Direction
-              -> DS.Set CellID
+getEdgeIDsDir :: Size -> Cells -> Direction -> DS.Set CellID
 getEdgeIDsDir si cs dir =
   DS.fromList . fst . DL.partition (isEdge cs dir) $ allCellIDs si
 
@@ -332,46 +336,39 @@ lookUntil si cs selectedCID dir dirRel curCell =
 
 -- Returns the CellID of a cell adjacent to to a given cell.
 adjacentCellID :: Direction -> Rel -> CellID -> CellID
-adjacentCellID dir dirRel (CellID row col) =
-  case dir of
-    Across -> CellID row $ col + dirVal
-    Down   -> CellID (row + dirVal) col
-  where dirVal = case dirRel of
-                   Plus  -> 1
-                   Minus -> -1
+adjacentCellID dir dirRel (CellID row col) = case dir of
+  Across -> CellID row $ col + dirVal
+  Down   -> CellID (row + dirVal) col
+  where
+    dirVal = case dirRel of
+      Plus  -> 1
+      Minus -> -1
 
 -- Returns a cell's state from the group of all cells.
 getCellState :: Cells -> CellID -> Maybe CellState
-getCellState cs cID =
-  case IntMap.lookup row cs of
-    Nothing -> Nothing
-    Just r  -> case IntMap.lookup col r of
-                 Nothing -> Nothing
-                 Just c  -> Just c
-    where CellID row col = cID
+getCellState cs cID = Map.lookup cID cs
 
 -- If a cell's state is updated, its complement will also need to be updated.
 -- This function outlines how the complement should be updated.
 updateComp :: CellState -> CellState -> CellState
-updateComp changedCell compCell =
-  case changedCell of
-    Off     -> Off
-    Empty   -> Empty
-    On      -> case compCell of
-                 Alpha c -> Alpha c
-                 _       -> On
-    Alpha c -> case compCell of
-                 Alpha d -> Alpha d
-                 _       -> On
+updateComp changedCell compCell = case changedCell of
+  Off -> Off
+  Empty -> Empty
+  On -> case compCell of
+          Alpha c -> Alpha c
+          _       -> On
+  Alpha c -> case compCell of
+               Alpha d -> Alpha d
+               _       -> On
 
 -- Returns a cell's complement CellID.
 complementCellID :: Size -> Symmetry -> CellID -> Maybe CellID
 complementCellID si sym (CellID row col) =
   case sym of
-    XY     -> Just $ CellID (numCells - row + 1) (numCells - col + 1)
-    X      -> Just $ CellID (numCells - row + 1) col
-    Y      -> Just $ CellID row (numCells - col + 1)
-    NoSym  -> Nothing
+    XY -> Just $ CellID (numCells - row + 1) (numCells - col + 1)
+    X -> Just $ CellID (numCells - row + 1) col
+    Y -> Just $ CellID row (numCells - col + 1)
+    NoSym -> Nothing
   where numCells = sizeToInt si
 
 -- If an adjacent CellID is outside of the board size, will return a CellID as
@@ -387,11 +384,7 @@ ifEndBegin si (CellID r c)
 
 -- Retruns the CellID of the next cell that should be selected after the
 -- currently selected cell.
-nextSelected :: Size
-             -> Direction
-             -> CellID
-             -> Cells 
-             -> CellID
+nextSelected :: Size -> Direction -> CellID -> Cells -> CellID
 nextSelected si dir selectedCID cs =
   case rAdj > numCells || cAdj > numCells of
     True -> case lookUntil si cs selectedCID dir Minus selectedCID of
@@ -404,56 +397,16 @@ nextSelected si dir selectedCID cs =
 -- Given a direction, returns the other direction.
 otherDir :: Direction -> Direction
 otherDir d = case d of
-               Down   -> Across
-               Across -> Down
+  Down   -> Across
+  Across -> Down
 
 -- Given a cell's state, returns the next cell state in the toggling series.
 toggleCellState :: Maybe CellState -> CellState
-toggleCellState cState =
-  case cState of
-    Nothing -> Empty
-    Just cS -> case cS of
-                 Empty   -> Off
-                 Off     -> On
-                 On      -> Empty
-                 Alpha _ -> Off
+toggleCellState cState = case cState of
+  Nothing -> Empty
+  Just cS -> case cS of
+    Empty -> Off
+    Off -> On
+    On -> Empty
+    Alpha _ -> Off
 
---------------------------------------------------------------------------------
--- Pretty printing for command-line app
---------------------------------------------------------------------------------
-
-prettyBoard :: Board -> [Char]
-prettyBoard (Board _ s _ _ _ _ _ cs _) =
-  "   " <> prettyCols s <> ['\n'] <> (IntMap.foldrWithKey prettyRows "" cs)
-
-prettyRows :: IntMap.Key -> IntMap.IntMap CellState -> [Char] -> [Char]
-prettyRows k newRow prevRowPretty =
-  r ++ " " ++ (prettyRow newRow) ++ ['\n'] ++ prevRowPretty
-    where r = intWLeadZero k
-
-prettyRow :: IntMap.IntMap CellState -> [Char]
-prettyRow cs =
-  Protolude.foldl prettyCellStates "" cs
-
-prettyCols :: Size -> [Char]
-prettyCols s = Protolude.foldr appNums "" [1..numCols]
-  where numCols = sizeToInt s
-        appNums :: Int -> [Char] -> [Char]
-        appNums i cs = (intWLeadZero i) ++ " " ++ cs
-
-prettyCellStates :: [Char] -> CellState -> [Char]
-prettyCellStates prevPretty newCell = smushed
-  where smushed = prevPretty ++ newPretty
-        newPretty =
-          case newCell of
-            On      -> "_  "
-            Off     -> "x  "
-            Empty   -> ".  "
-            Alpha c -> (DC.toUpper c) : "  "
-
-intWLeadZero :: Int -> [Char]
-intWLeadZero i =
-  case i <= 9 of
-    True  -> "0" ++ j
-    False -> j
-  where j = show i
