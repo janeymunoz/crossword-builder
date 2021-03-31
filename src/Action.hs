@@ -9,9 +9,16 @@ import Crossword
 
 data Action
   = NoAction
+--  | Save
   | UpdateCell CellID CellState
+  | UpdateComplement CellID CellState
   | UpdateDirection
-  | UpdateSelected CellID (Maybe (CellID, CellID))
+  | UpdateHighlighted
+  | UpdateNextSelected CellID
+  | UpdateSelected CellID
+  | UpdateSize Size
+  | UpdateSymmetry Symmetry
+  | UpdateWords
   | ArrowPress Arrows
   | KeyboardPress (Set Int)
   deriving (Eq, Show)

@@ -9,6 +9,7 @@ import qualified Control.Lens.Operators as Ops
 import qualified Data.Char as DC
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.List as DL
 import qualified Data.Set as DS
 import qualified Data.Text as DT hiding (zip, replicate)
@@ -59,7 +60,7 @@ data Symmetry
   | X
   | Y
   | NoSym
-  deriving (Show, Read, Eq)
+  deriving (Show, Read, Enum, Eq)
 
 data Board = Board
   { _direction :: Direction
@@ -68,7 +69,7 @@ data Board = Board
   , _selected :: CellID
   , _highlighted :: Maybe (CellID, CellID)
   , _answerIDs :: IntMap.IntMap CellID
-  , _wordBank :: [Maybe Word']
+  , _wordBank :: [Word']
   , _cells :: Cells
   , _sessionID :: FilePath
   }
@@ -92,7 +93,7 @@ highlighted = Lens.lens _highlighted $ \board newCIDs -> board { _highlighted = 
 answerIDs :: Lens.Lens' Board (IntMap.IntMap CellID)
 answerIDs = Lens.lens _answerIDs $ \board newMapCIDs -> board { _answerIDs = newMapCIDs }
 
-wordBank :: Lens.Lens' Board [Maybe Word']
+wordBank :: Lens.Lens' Board [Word']
 wordBank = Lens.lens _wordBank $ \board newWordBank -> board { _wordBank = newWordBank }
 
 cells :: Lens.Lens' Board Cells
@@ -186,28 +187,27 @@ parseWords wordMs (across, down) =
     Just (Word' cID ansID Across chars) : ws -> parseWords ws (across ++ [DT.pack ((show ansID) ++ " " ++ chars)], down)
     Just (Word' cID ansID Down chars) : ws -> parseWords ws (across, down ++ [DT.pack ((show ansID) ++ " " ++ chars)])
 
-makeWords :: Size -> Cells -> [Maybe Word']
-makeWords si cs =
+makeWords :: Size -> Cells -> [Word']
+makeWords si cs = Maybe.catMaybes $
   Protolude.map (toWord si cs Across) across ++
     Protolude.map (toWord si cs Down) down
   where
     across = DS.toList $ getWordEnds si cs Across
     down   = DS.toList $ getWordEnds si cs Down
-
-toWord :: Size
-       -> Cells
-       -> Direction
-       -> Maybe (CellID, CellID)
-       -> Maybe Word'
-toWord si cs dir range =
-  case range of
-    Nothing -> Nothing
-    Just (cID, _) -> Just $ Word' cID ansID dir chars
-      where
-        chars =
-          getWordStr . getWordChars $ getCellStateWord dir cs range
-        [(ansID, _)] =
-          IntMap.toList . IntMap.filter ((==) cID) $ getAnswerIDs si cs
+    toWord :: Size
+           -> Cells
+           -> Direction
+           -> Maybe (CellID, CellID)
+           -> Maybe Word'
+    toWord si cs dir range =
+      case range of
+        Nothing -> Nothing
+        Just (cID, _) -> Just $ Word' cID ansID dir chars
+          where
+            chars =
+              getWordStr . getWordChars $ getCellStateWord dir cs range
+            [(ansID, _)] =
+              IntMap.toList . IntMap.filter ((==) cID) $ getAnswerIDs si cs
 
 getWords :: Size
          -> Cells
@@ -363,13 +363,17 @@ updateComp changedCell compCell = case changedCell of
 
 -- Returns a cell's complement CellID.
 complementCellID :: Size -> Symmetry -> CellID -> Maybe CellID
-complementCellID si sym (CellID row col) =
-  case sym of
-    XY -> Just $ CellID (numCells - row + 1) (numCells - col + 1)
-    X -> Just $ CellID (numCells - row + 1) col
-    Y -> Just $ CellID row (numCells - col + 1)
-    NoSym -> Nothing
-  where numCells = sizeToInt si
+complementCellID si sym cId@(CellID row col)
+  | mComplement == Just cId = Nothing
+  | otherwise = mComplement
+  where
+    numCells = sizeToInt si
+    mComplement = 
+      case sym of
+        XY -> Just $ CellID (numCells - row + 1) (numCells - col + 1)
+        X -> Just $ CellID (numCells - row + 1) col
+        Y -> Just $ CellID row (numCells - col + 1)
+        NoSym -> Nothing
 
 -- If an adjacent CellID is outside of the board size, will return a CellID as
 -- if cells are in a continuous loop.
@@ -382,7 +386,7 @@ ifEndBegin si (CellID r c)
   | otherwise = CellID r c
   where siInt = sizeToInt si
 
--- Retruns the CellID of the next cell that should be selected after the
+-- Returns the CellID of the next cell that should be selected after the
 -- currently selected cell.
 nextSelected :: Size -> Direction -> CellID -> Cells -> CellID
 nextSelected si dir selectedCID cs =
@@ -409,4 +413,36 @@ toggleCellState cState = case cState of
     Off -> On
     On -> Empty
     Alpha _ -> Off
+
+--------------------------------------------------------------------------------
+
+wordsFp :: FilePath
+wordsFp = "/etc/dictionaries-common/words"
+
+wordRange :: (Int, Int)
+wordRange = (19109, 101825)
+
+getDict :: IO ()
+getDict = do
+  f <- readFile wordsFp
+  let words = keepOkWords $ DT.lines f
+  writeFile "/home/janey/gits/github.com/janeymunoz/crossword-builder/words" $ DT.unlines words
+
+keepOkWords :: [Text] -> [Text]
+keepOkWords allWords = foldr f [] allWords
+  where
+    f :: Text -> [Text] -> [Text]
+    f word words =
+      if and
+         [ wordLen > 3
+         , wordLen < 16
+         , and . map ('\'' /= ) $ DT.unpack word
+         ]
+         then word : words
+         else words
+           where
+             wordLen = DT.length word
+
+
+
 

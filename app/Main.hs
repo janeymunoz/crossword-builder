@@ -13,11 +13,11 @@ import Update
 import View
 
 main :: IO ()
-main =
+main = do
   Miso.startApp $
     Miso.App
        { initialAction = NoAction
-       , model         = Model $ startBoard Fifteen "test.cw"
+       , model         = Model (startBoard Fifteen "test.cw") True
        , update        = fromTransition . updateModel
        , view          = viewModel
        , events        = defaultEvents
